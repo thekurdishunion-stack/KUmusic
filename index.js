@@ -1,6 +1,6 @@
 const { Client, GatewayIntentBits } = require('discord.js');
-const { Player } = require('discord-player');
-const { YoutubeiExtractor } = require('@discord-player/extractor');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
+const play = require('play-dl');
 
 const client = new Client({
   intents: [
@@ -11,8 +11,7 @@ const client = new Client({
   ]
 });
 
-const player = new Player(client);
-player.extractors.register(YoutubeiExtractor, {});
+const queue = new Map();
 
 client.once('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
@@ -20,67 +19,58 @@ client.once('ready', () => {
 
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
-
   const args = message.content.split(' ');
   const command = args[0].toLowerCase();
 
-  // !play command
   if (command === '!play') {
     const query = args.slice(1).join(' ');
-    if (!query) return message.reply('Please provide a song name! e.g. `!play Shape of You`');
-
+    if (!query) return message.reply('Please provide a song! e.g. `!play Shape of You`');
     const voiceChannel = message.member.voice.channel;
-    if (!voiceChannel) return message.reply('You need to be in a voice channel first!');
+    if (!voiceChannel) return message.reply('Join a voice channel first!');
 
     try {
-      const { track } = await player.play(voiceChannel, query, {
-        nodeOptions: { metadata: message }
+      const searched = await play.search(query, { limit: 1 });
+      if (!searched.length) return message.reply('No results found!');
+      const song = searched[0];
+      const stream = await play.stream(song.url);
+      const resource = createAudioResource(stream.stream, { inputType: stream.type });
+      const player = createAudioPlayer();
+      const connection = joinVoiceChannel({
+        channelId: voiceChannel.id,
+        guildId: message.guild.id,
+        adapterCreator: message.guild.voiceAdapterCreator,
       });
-      message.reply(`🎵 Now playing: **${track.title}**`);
+      connection.subscribe(player);
+      player.play(resource);
+      queue.set(message.guild.id, { connection, player });
+      message.reply(`🎵 Now playing: **${song.title}**`);
     } catch (e) {
-      message.reply('Something went wrong! Could not play that song.');
       console.error(e);
+      message.reply('Something went wrong!');
     }
   }
 
-  // !skip command
-  if (command === '!skip') {
-    const queue = player.nodes.get(message.guild);
-    if (!queue) return message.reply('No music is playing!');
-    queue.node.skip();
-    message.reply('⏭️ Skipped!');
-  }
-
-  // !stop command
   if (command === '!stop') {
-    const queue = player.nodes.get(message.guild);
-    if (!queue) return message.reply('No music is playing!');
-    queue.delete();
-    message.reply('⏹️ Stopped and left the channel!');
+    const server = queue.get(message.guild.id);
+    if (!server) return message.reply('Nothing is playing!');
+    server.player.stop();
+    server.connection.destroy();
+    queue.delete(message.guild.id);
+    message.reply('⏹️ Stopped!');
   }
 
-  // !pause command
   if (command === '!pause') {
-    const queue = player.nodes.get(message.guild);
-    if (!queue) return message.reply('No music is playing!');
-    queue.node.pause();
+    const server = queue.get(message.guild.id);
+    if (!server) return message.reply('Nothing is playing!');
+    server.player.pause();
     message.reply('⏸️ Paused!');
   }
 
-  // !resume command
   if (command === '!resume') {
-    const queue = player.nodes.get(message.guild);
-    if (!queue) return message.reply('No music is playing!');
-    queue.node.resume();
+    const server = queue.get(message.guild.id);
+    if (!server) return message.reply('Nothing is playing!');
+    server.player.unpause();
     message.reply('▶️ Resumed!');
-  }
-
-  // !queue command
-  if (command === '!queue') {
-    const queue = player.nodes.get(message.guild);
-    if (!queue || !queue.tracks.size) return message.reply('The queue is empty!');
-    const tracks = queue.tracks.map((t, i) => `${i + 1}. ${t.title}`).join('\n');
-    message.reply(`📋 **Queue:**\n${tracks}`);
   }
 });
 
