@@ -1,6 +1,5 @@
 const { Client, GatewayIntentBits } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource } = require('@discordjs/voice');
-const play = require('play-dl');
+const { DisTube } = require('distube');
 
 const client = new Client({
   intents: [
@@ -11,20 +10,22 @@ const client = new Client({
   ]
 });
 
-const queue = new Map();
-
-// Set YouTube cookie if available
-if (process.env.YOUTUBE_COOKIE) {
-  play.setToken({
-    youtube: {
-      cookie: process.env.YOUTUBE_COOKIE
-    }
-  });
-}
+const distube = new DisTube(client, {
+  emitNewSongOnly: true,
+});
 
 client.once('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
+
+distube
+  .on('playSong', (queue, song) => {
+    queue.textChannel.send(`🎵 Now playing: **${song.name}**`);
+  })
+  .on('error', (channel, error) => {
+    channel.send('Something went wrong!');
+    console.error(error);
+  });
 
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
@@ -33,54 +34,16 @@ client.on('messageCreate', async (message) => {
 
   if (command === '!play') {
     const query = args.slice(1).join(' ');
-    if (!query) return message.reply('Please provide a song! e.g. `!play Shape of You`');
+    if (!query) return message.reply('Please provide a song!');
     const voiceChannel = message.member.voice.channel;
     if (!voiceChannel) return message.reply('Join a voice channel first!');
-
-    try {
-      const searched = await play.search(query, { limit: 1 });
-      if (!searched.length) return message.reply('No results found!');
-      const song = searched[0];
-      const stream = await play.stream(song.url);
-      const resource = createAudioResource(stream.stream, { inputType: stream.type });
-      const player = createAudioPlayer();
-      const connection = joinVoiceChannel({
-        channelId: voiceChannel.id,
-        guildId: message.guild.id,
-        adapterCreator: message.guild.voiceAdapterCreator,
-      });
-      connection.subscribe(player);
-      player.play(resource);
-      queue.set(message.guild.id, { connection, player });
-      message.reply(`🎵 Now playing: **${song.title}**`);
-    } catch (e) {
-      console.error(e);
-      message.reply('Something went wrong!');
-    }
+    distube.play(voiceChannel, query, { textChannel: message.channel });
   }
 
-  if (command === '!stop') {
-    const server = queue.get(message.guild.id);
-    if (!server) return message.reply('Nothing is playing!');
-    server.player.stop();
-    server.connection.destroy();
-    queue.delete(message.guild.id);
-    message.reply('⏹️ Stopped!');
-  }
-
-  if (command === '!pause') {
-    const server = queue.get(message.guild.id);
-    if (!server) return message.reply('Nothing is playing!');
-    server.player.pause();
-    message.reply('⏸️ Paused!');
-  }
-
-  if (command === '!resume') {
-    const server = queue.get(message.guild.id);
-    if (!server) return message.reply('Nothing is playing!');
-    server.player.unpause();
-    message.reply('▶️ Resumed!');
-  }
+  if (command === '!stop') distube.stop(message.guild);
+  if (command === '!pause') distube.pause(message.guild);
+  if (command === '!resume') distube.resume(message.guild);
+  if (command === '!skip') distube.skip(message.guild);
 });
 
 client.login(process.env.TOKEN);
