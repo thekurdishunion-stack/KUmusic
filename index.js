@@ -1,5 +1,5 @@
 const { Client, GatewayIntentBits } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource } = require('@discordjs/voice');
 const play = require('play-dl');
 
 const client = new Client({
@@ -12,6 +12,15 @@ const client = new Client({
 });
 
 const queue = new Map();
+
+// Set YouTube cookie if available
+if (process.env.YOUTUBE_COOKIE) {
+  play.setToken({
+    youtube: {
+      cookie: process.env.YOUTUBE_COOKIE
+    }
+  });
+}
 
 client.once('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
